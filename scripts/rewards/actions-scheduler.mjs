@@ -109,6 +109,7 @@ export async function runScheduler(env, {timeoutMs = maxTimeoutMs} = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > maxTimeoutMs)
     fail('configuration_invalid');
   const queues = [];
+  let firstFailure;
   for (const queue of config.queues) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -131,13 +132,16 @@ export async function runScheduler(env, {timeoutMs = maxTimeoutMs} = {}) {
       if (response.status !== 200) fail('http_failure');
       queues.push({queue, counters: await readCounters(response, queue)});
     } catch (error) {
-      if (error instanceof SchedulerFailure) throw error;
-      fail('transport_failure');
+      firstFailure ??=
+        error instanceof SchedulerFailure
+          ? error
+          : new SchedulerFailure('transport_failure');
     } finally {
       clearTimeout(timer);
       controller.abort();
     }
   }
+  if (firstFailure) throw firstFailure;
   return {status: 'completed', queues};
 }
 
@@ -150,7 +154,7 @@ export async function main(
     write(
       result.status === 'disabled'
         ? 'Rewards scheduler disabled'
-        : `Rewards scheduler completed: ${result.queues.map(({queue, counters}) => `${queue}=${JSON.stringify(counters)}`).join(' ')}`,
+        : 'Rewards scheduler completed',
     );
     return 0;
   } catch (error) {

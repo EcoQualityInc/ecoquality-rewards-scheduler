@@ -154,12 +154,15 @@ test('redirects never forward bearer headers or invoke a second request', async 
       res.writeHead(status, {Location: '/capture-private-key'});
       res.end();
     });
-    await assert.rejects(runScheduler(env), /http_failure/);
+    await assert.rejects(
+      runScheduler({...env, REWARDS_SCHEDULER_QUEUES: 'orders'}),
+      /http_failure/,
+    );
     assert.equal(requests.length, 1);
   }
 });
 
-test('HTTP failures stop subsequent queues without retries or private error output', async (t) => {
+test('HTTP failures attempt every queue without retries or private error output', async (t) => {
   const {main} = implementation();
   for (const status of [401, 404, 429, 503]) {
     const {env, requests} = await local(t, (_req, res) =>
@@ -168,7 +171,16 @@ test('HTTP failures stop subsequent queues without retries or private error outp
     const output = [];
     assert.equal(await main(env, {write: (text) => output.push(text)}), 1);
     assert.deepEqual(output, ['Rewards scheduler failed: http_failure']);
-    assert.equal(requests.length, 1);
+    assert.deepEqual(
+      requests.map((request) => request.url),
+      [
+        '/api/rewards/jobs?queue=orders',
+        '/api/rewards/jobs?queue=rewards',
+        '/api/rewards/jobs?queue=notifications',
+        '/api/rewards/jobs?queue=codes',
+        '/api/rewards/jobs?queue=poll',
+      ],
+    );
   }
 });
 
@@ -217,7 +229,7 @@ test('timeout bounds headers and streaming bodies with no automatic retry', asyn
       }
     });
     await assert.rejects(
-      runScheduler(env, {timeoutMs: 80}),
+      runScheduler({...env, REWARDS_SCHEDULER_QUEUES: 'orders'}, {timeoutMs: 80}),
       /transport_failure/,
     );
     assert.equal(requests.length, 1);
@@ -247,7 +259,50 @@ test('selected queues remain serial, bounded and safely summarized', async (t) =
   );
   assert.equal(maxActive, 1);
   assert.equal(requests.length, 2);
-  assert.deepEqual(output, [
-    'Rewards scheduler completed: codes={"codes":1} poll={"polled":50}',
-  ]);
+  assert.deepEqual(output, ['Rewards scheduler completed']);
 });
+
+for (const [failure, expectedCode] of [
+  ['http', 'http_failure'],
+  ['malformed', 'response_invalid'],
+  ['timeout-headers', 'transport_failure'],
+  ['timeout-body', 'transport_failure'],
+]) {
+  test(`first ${failure} failure still attempts later poll and preserves first failure`, async (t) => {
+    const {main} = implementation();
+    const {env, requests} = await local(t, (req, res) => {
+      const queue = new URL(req.url, 'http://127.0.0.1').searchParams.get('queue');
+      if (queue === 'orders') {
+        if (failure === 'http') reply(res, secret, 503);
+        else if (failure === 'malformed') reply(res, '{');
+        else if (failure === 'timeout-body') {
+          res.writeHead(200, {'Content-Type': 'application/json'});
+          res.write('{');
+        }
+        return;
+      }
+      if (queue === 'rewards') {
+        if (failure === 'http') reply(res, '{');
+        else reply(res, secret, 503);
+        return;
+      }
+      reply(res, replies[queue]);
+    });
+    const output = [];
+    assert.equal(
+      await main(env, {timeoutMs: 80, write: (text) => output.push(text)}),
+      1,
+    );
+    assert.deepEqual(
+      requests.map((request) => request.url),
+      [
+        '/api/rewards/jobs?queue=orders',
+        '/api/rewards/jobs?queue=rewards',
+        '/api/rewards/jobs?queue=notifications',
+        '/api/rewards/jobs?queue=codes',
+        '/api/rewards/jobs?queue=poll',
+      ],
+    );
+    assert.deepEqual(output, [`Rewards scheduler failed: ${expectedCode}`]);
+  });
+}
