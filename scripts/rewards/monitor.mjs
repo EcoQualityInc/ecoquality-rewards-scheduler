@@ -3,7 +3,7 @@ import {resolve} from 'node:path';
 
 // Independent read-only health check. It never claims or advances business work.
 export async function monitorRewards({env = process.env, fetchImpl = fetch} = {}) {
-  if (env.REWARDS_SCHEDULER_ENABLED === 'true') return;
+  let failedStatus;
   try {
     if (env.REWARDS_SCHEDULER_ENABLED !== 'false' ||
       env.REWARDS_SCHEDULER_OWNER !== 'EcoQualityInc' ||
@@ -13,7 +13,7 @@ export async function monitorRewards({env = process.env, fetchImpl = fetch} = {}
       headers: {Authorization: `Bearer ${env.REWARDS_WORKER_SECRET}`, 'Content-Type': 'application/json'},
       body: '{}',
     });
-    if (response.status !== 200) {await response.body?.cancel(); throw Error();}
+    if (response.status !== 200) {failedStatus = response.status; await response.body?.cancel(); throw Error();}
     const reader = response.body?.getReader();
     if (!reader) throw Error();
     const chunks = []; let size = 0;
@@ -28,9 +28,9 @@ export async function monitorRewards({env = process.env, fetchImpl = fetch} = {}
     for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.length;}
     const value = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes));
     if (!value || Object.keys(value).length !== 1 || value.healthy !== 1) throw Error();
-  } catch {throw new Error('Rewards health check failed.');}
+  } catch {throw new Error(`Rewards health check failed${Number.isInteger(failedStatus) && failedStatus >= 100 && failedStatus <= 599 ? ` (HTTP ${failedStatus})` : ''}.`);}
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {await monitorRewards(); process.stdout.write('Rewards health verified.\n');}
-  catch {process.stderr.write('Rewards health check failed. Review the private Rewards administration.\n'); process.exitCode = 1;}
+  catch (error) {process.stderr.write(`${error.message} Review the private Rewards administration.\n`); process.exitCode = 1;}
 }
