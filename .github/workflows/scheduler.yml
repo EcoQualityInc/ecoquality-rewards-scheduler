@@ -1,4 +1,4 @@
-name: EcoQuality Rewards background processor
+name: EcoQuality Rewards health monitor
 
 on:
   schedule:
@@ -16,7 +16,6 @@ jobs:
   monitor:
     if: >-
       github.repository == 'EcoQualityInc/ecoquality-rewards-scheduler' &&
-      vars.REWARDS_SCHEDULER_ENABLED == 'false' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -31,30 +30,3 @@ jobs:
           REWARDS_SCHEDULER_OWNER: ${{ vars.REWARDS_SCHEDULER_OWNER }}
           REWARDS_WORKER_SECRET: ${{ secrets.REWARDS_SCHEDULER_WORKER_SECRET }}
         run: node scripts/rewards/monitor.mjs
-  dispatch:
-    if: >-
-      github.repository == 'EcoQualityInc/ecoquality-rewards-scheduler' &&
-      vars.REWARDS_SCHEDULER_ENABLED == 'true' &&
-      github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 4
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Dispatch bounded private Rewards queues
-        env:
-          REWARDS_SCHEDULER_ENABLED: ${{ vars.REWARDS_SCHEDULER_ENABLED }}
-          REWARDS_SCHEDULER_OWNER: ${{ vars.REWARDS_SCHEDULER_OWNER }}
-          REWARDS_SCHEDULER_QUEUES: ${{ vars.REWARDS_SCHEDULER_QUEUES }}
-          REWARDS_SCHEDULER_ORIGIN: https://ecoqualityinc.com
-          REWARDS_WORKER_SECRET: ${{ secrets.REWARDS_SCHEDULER_WORKER_SECRET }}
-        shell: bash
-        run: |
-          if node scripts/rewards/actions-scheduler.mjs >/dev/null; then
-            echo 'Rewards dispatch completed.'
-          else
-            echo '::error::Rewards dispatch failed. Review the private Rewards administration.'
-            exit 1
-          fi
