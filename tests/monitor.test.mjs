@@ -14,16 +14,22 @@ test('monitor calls only the fixed read-only health queue with redirect refusal'
   }});
   assert.equal(requests, 1);
 });
-test('monitor does nothing while the GitHub business processor is enabled', async () => {
-  await monitorRewards({env: {...env, REWARDS_SCHEDULER_ENABLED: 'true'}, fetchImpl: () => assert.fail('no request')});
+test('retired financial-dispatch configuration cannot silently disable the independent monitor', async () => {
+  await assert.rejects(monitorRewards({env: {...env, REWARDS_SCHEDULER_ENABLED: 'true'}, fetchImpl: () => assert.fail('no request')}), /Rewards health check failed/);
 });
 test('monitor rejects failures, redirects, malformed and oversized replies without leaking response text', async () => {
   for (const response of [new Response('private diagnostic', {status: 503}), new Response('', {status: 302}),
     Response.json({orders: 1}), new Response('x'.repeat(100)), Response.json({healthy: 1, extra: 1})]) {
     await assert.rejects(monitorRewards({env, fetchImpl: async () => response}), error => {
-      assert.equal(error.message, 'Rewards health check failed.'); return true;
+      assert.match(error.message, /^Rewards health check failed(?: \(HTTP [1-5]\d{2}\))?\.$/);
+      assert.ok(!error.message.includes('private diagnostic')); return true;
     });
   }
+});
+
+test('failed HTTP health checks report only a sanitized status code', async () => {
+  await assert.rejects(monitorRewards({env, fetchImpl: async () => new Response('private customer diagnostic', {status: 503})}),
+    error => error.message === 'Rewards health check failed (HTTP 503).');
 });
 test('missing owner or private key fails before any request', async () => {
   for (const patch of [{REWARDS_SCHEDULER_OWNER: 'other'}, {REWARDS_WORKER_SECRET: ''}]) {
