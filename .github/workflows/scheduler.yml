@@ -13,6 +13,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  monitor:
+    if: >-
+      github.repository == 'EcoQualityInc/ecoquality-rewards-scheduler' &&
+      vars.REWARDS_SCHEDULER_ENABLED == 'false' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check private Rewards health without processing business work
+        env:
+          REWARDS_SCHEDULER_ENABLED: ${{ vars.REWARDS_SCHEDULER_ENABLED }}
+          REWARDS_SCHEDULER_OWNER: ${{ vars.REWARDS_SCHEDULER_OWNER }}
+          REWARDS_WORKER_SECRET: ${{ secrets.REWARDS_SCHEDULER_WORKER_SECRET }}
+        run: node scripts/rewards/monitor.mjs
   dispatch:
     if: >-
       github.repository == 'EcoQualityInc/ecoquality-rewards-scheduler' &&
