@@ -10,7 +10,8 @@ discount codes, or database connection settings.
 ## Safety
 
 - The read-only monitor runs when `REWARDS_SCHEDULER_ENABLED=false`.
-- The legacy financial dispatcher remains disabled; do not enable it alongside Supabase.
+- The financial dispatch job has been removed from this workflow. Supabase alone processes business jobs.
+- A stale financial-enable flag fails the monitor instead of silently skipping its check.
 - Runs only from `main` in this exact repository, on the standard Ubuntu runner.
 - No pull-request triggers, package installation, artifact uploads, or caches.
 - The worker key is an Actions secret, supplied only to the selected worker step.
